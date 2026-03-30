@@ -336,9 +336,9 @@ if __name__ == "__main__":
     print("\nPRODUCTS")
     print(products_df.head())
 
-    categories_df.to_csv("butler_categories.csv", index=False)
-    products_df.to_csv("butler_products.csv", index=False)
+    categories_df.to_excel("butler_categories.xlsx", index=False)
+    products_df.to_excel("butler_products.xlsx", index=False)
 
     print("\nSaved:")
-    print(" - butler_categories.csv")
-    print(" - butler_products.csv")
+    print(" - butler_categories.xlsx")
+    print(" - butler_products.xlsx")
