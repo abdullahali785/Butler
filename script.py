@@ -277,6 +277,26 @@ def scrape_product(category_name, product_url):
         }
 
 
+def get_soup(url):
+    response = requests.get(url, headers=HEADERS, timeout=30)
+    response.raise_for_status()
+
+    return BeautifulSoup(response.text, "html.parser")
+
+def clean_text(text):
+    if text is None:
+        return ""
+    
+    return " ".join(text.strip().split())
+
+def make_absolute(url):
+    if not url:
+        return None
+    
+    return urljoin(BASE_URL, url)
+
+
+
 def scrape():
     categories_df = scrape_categories()
     all_product_links = []
@@ -306,25 +326,6 @@ def scrape():
 
     products_df = pd.DataFrame(all_products)
     return categories_df, products_df
-
-
-def get_soup(url):
-    response = requests.get(url, headers=HEADERS, timeout=30)
-    response.raise_for_status()
-
-    return BeautifulSoup(response.text, "html.parser")
-
-def clean_text(text):
-    if text is None:
-        return ""
-    
-    return " ".join(text.strip().split())
-
-def make_absolute(url):
-    if not url:
-        return None
-    
-    return urljoin(BASE_URL, url)
 
 
 if __name__ == "__main__":
