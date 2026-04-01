@@ -69,6 +69,8 @@ def scrape_categories():
             "Image": image_url
         })
 
+        break
+
     categories_df = pd.DataFrame(categories).drop_duplicates(subset=["URL"]).reset_index(drop=True)
     return categories_df
 
@@ -111,53 +113,69 @@ def scrape_product_links(category_name, category_url):
 
 def extract_sku(soup):
     text = clean_text(soup.get_text("\n"))
-    match = re.search(r"\b[A-Z0-9.\-]{5,}\b", text)
+    matches = re.findall(r"\b[A-Z][A-Z0-9.\-]{4,}\b", text)
 
-    return match.group(0) if match else None
+    for m in matches:
+        if any(ch.isdigit() for ch in m):
+            return m
+    return None
 
 def extract_prices(soup):
-    text = clean_text(soup.get_text(" "))
+    price_div = soup.find("div", class_=lambda c: c and "price" in c)
+    if not price_div:
+        return 0.0, 0.0
 
-    prices = re.findall(r"\$\d[\d,]*(?:\.\d{2})?", text)
-    sale_price, listed_price = None, None
+    text = clean_text(price_div.get_text(" "))
+    match = re.search(r"\$?(\d[\d,]*\.?\d*)", text)
+    if not match:
+        return 0.0, 0.0
 
-    if len(prices) >= 1:
-        sale_price = prices[0]
+    sale_price = match.group(1).replace(",", "")
+    listed_price = sale_price
 
-    if len(prices) >= 2:
-        listed_price = prices[1]
+    product_name = extract_product_name(soup)
+    if product_name and "(Inventory Clearance)" in product_name:
+        desc_div = soup.find("div", class_="description", itemprop="description")
+        if desc_div:
+            desc_text = clean_text(desc_div.get_text(" "))
+            was_match = re.search(r"Was\s+\$(\d[\d,]*\.?\d*)", desc_text, re.IGNORECASE)
+            if was_match:
+                listed_price = was_match.group(1).replace(",", "")
 
-    return sale_price, listed_price
+    return listed_price, sale_price
 
 def extract_volume_pricing(soup):
-    text = soup.get_text("\n")
-    if "VOLUME SAVINGS" not in text.upper():
-        return None
+    offer = soup.find("div", class_="offer")
+    if not offer:
+        return "No Volume Savings"
 
-    lines = [clean_text(line) for line in text.splitlines() if clean_text(line)]
-    volume_lines, capture = [], False
+    chart = offer.find("table", class_="vd_chart")
+    if not chart:
+        return "No Volume Savings"
 
-    for line in lines:
-        upper_line = line.upper()
+    title = chart.find("span", class_="title")
+    if not title or "VOLUME SAVINGS" not in title.get_text(" ", strip=True).upper():
+        return "No Volume Savings"
 
-        if "VOLUME SAVINGS" in upper_line:
-            capture = True
-            volume_lines.append(line)
-            continue
+    lines = []
+    caption = chart.find("caption")
+    if caption:
+        caption_text = " ".join(caption.stripped_strings)
+        if caption_text:
+            lines.append(caption_text)
 
-        if capture:
-            if line in ["QTY:", "Go back"]:
-                break
+    for row in chart.find_all("tr"):
+        cells = row.find_all("td")
+        if len(cells) >= 2:
+            qty = " ".join(cells[0].stripped_strings)
+            discount = " ".join(cells[1].stripped_strings)
+            if qty and discount:
+                lines.append(f"{qty} {discount}")
 
-            volume_lines.append(line)
+    if not lines:
+        return "No Volume Savings"
 
-            if len(volume_lines) > 12:
-                break
-
-    if volume_lines:
-        return " | ".join(volume_lines)
-
-    return None
+    return " | ".join(lines)
 
 def extract_description(soup):
     lines = [clean_text(line) for line in soup.get_text("\n").splitlines()]
@@ -305,7 +323,7 @@ def scrape():
         category_name = row["Name"]
         category_url = row["URL"]
 
-        # print("Scraping category:", category_name)
+        print("Scraping category:", category_name)
         links = scrape_product_links(category_name, category_url)
         all_product_links.extend(links)
 
@@ -314,13 +332,21 @@ def scrape():
     product_links_df = pd.DataFrame(all_product_links).drop_duplicates(subset=["Product URL"]).reset_index(drop=True)
     all_products = []
 
+    count = 0
+
     for _, row in product_links_df.iterrows():
+        if count >= 1:
+            break
+        
         category_name = row["Category Name"]
         product_url = row["Product URL"]
 
-        # print("Scraping product:", product_url)
-        product_data = scrape_product(category_name, product_url)
+        # print("Scraping product:", product_url.split("https://www.butlersystem.com/")[-1])
+        # product_data = scrape_product(category_name, product_url)
+        product_data = scrape_product("inventory-clearance", "https://www.butlersystem.com/inventory-clearance/dri-eaz-filter-2nd-stage-defendair-500-air-scrubber")
         all_products.append(product_data)
+
+        count += 1
 
         # time.sleep(1)
 
@@ -331,15 +357,16 @@ def scrape():
 if __name__ == "__main__":
     categories_df, products_df = scrape()
 
-    print("\nCATEGORIES")
-    print(categories_df.head())
+    # print("\nCATEGORIES")
+    # print(categories_df)
 
-    print("\nPRODUCTS")
-    print(products_df.head())
+    # print("\nPRODUCTS")
+    # print(products_df["Sale Price"])
 
-    categories_df.to_excel("butler_categories.xlsx", index=False)
-    products_df.to_excel("butler_products.xlsx", index=False)
+    # categories_df.to_excel("butler_categories.xlsx", index=False, engine="xlsxwriter")
+    # products_df.to_excel("butler_products.xlsx", index=False, engine="xlsxwriter")
+    products_df.to_csv("butler_products.csv", index=False)
 
-    print("\nSaved:")
-    print(" - butler_categories.xlsx")
-    print(" - butler_products.xlsx")
+    # print("\nSaved:")
+    # print(" - butler_categories.xlsx")
+    # print(" - butler_products.xlsx")
