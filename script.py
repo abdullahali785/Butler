@@ -1,7 +1,7 @@
 import pandas as pd
 import re, time, requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 BASE_URL = "https://www.butlersystem.com"
 SHOP_URL = "https://www.butlersystem.com/supply-division"
@@ -68,8 +68,6 @@ def scrape_categories():
             "URL": href,
             "Image": image_url
         })
-
-        break
 
     categories_df = pd.DataFrame(categories).drop_duplicates(subset=["URL"]).reset_index(drop=True)
     return categories_df
@@ -178,44 +176,29 @@ def extract_volume_pricing(soup):
     return " | ".join(lines)
 
 def extract_description(soup):
-    lines = [clean_text(line) for line in soup.get_text("\n").splitlines()]
-    lines = [line for line in lines if line]
+    desc_div = soup.find("div", class_="description")
+    if not desc_div:
+        return "No Description Avaiable"
 
-    ignore_words = {
-        "QTY:",
-        "Go back",
-        "Download SDS Sheet",
-        "Product Categories"
-    }
+    text = desc_div.get_text(" ", strip=True)
+    text = clean_text(text)
 
-    description_parts = []
-
-    for line in lines:
-        if line in ignore_words: continue
-
-        if re.fullmatch(r"\$\d[\d,]*(?:\.\d{2})?", line): continue
-        if re.fullmatch(r"[A-Z0-9.\-]{5,}", line): continue
-
-        if "VOLUME SAVINGS" in line.upper(): continue
-
-        if len(line) > 40:
-            description_parts.append(line)
-
-    if description_parts:
-        return " ".join(description_parts[:8])
-
-    return None
+    return text if text else "No Description Avaiable"
 
 def extract_all_images(soup, current_url):
     images = []
     seen = set()
 
-    for img in soup.find_all("img"):
-        src = img.get("src")
-        if not src:
+    container = soup.find("div", class_="size1of3")
+    if not container:
+        return images
+
+    for a in container.find_all("a"):
+        href = a.get("href")
+        if not href:
             continue
 
-        img_url = urljoin(current_url, src)
+        img_url = urljoin(current_url, href)
 
         if img_url not in seen:
             seen.add(img_url)
@@ -224,14 +207,21 @@ def extract_all_images(soup, current_url):
     return images
 
 def extract_sds_link(soup, current_url):
-    for a in soup.find_all("a", href=True):
-        text = clean_text(a.get_text()).lower()
+    desc_div = soup.find("div", class_="description")
+    if not desc_div:
+        return "No SDS Links Available"
+
+    parsed = urlparse(current_url)
+    base_url = f"{parsed.scheme}://{parsed.netloc}/"
+
+    for a in desc_div.find_all("a", href=True):
         href = a["href"]
+        href_lower = href.lower()
 
-        if "sds" in text or "sds" in href.lower():
-            return urljoin(current_url, href)
+        if "sds" in href_lower and href_lower.endswith(".pdf"):
+            return urljoin(base_url, href)
 
-    return None
+    return "No SDS Links Available"
 
 def extract_product_options(soup):
     options = []
@@ -249,7 +239,7 @@ def extract_product_options(soup):
     if options:
         return " | ".join(options)
 
-    return None
+    return "No Product Options"
 
 def extract_product_name(soup):
     h1 = soup.find("h1")
@@ -332,21 +322,13 @@ def scrape():
     product_links_df = pd.DataFrame(all_product_links).drop_duplicates(subset=["Product URL"]).reset_index(drop=True)
     all_products = []
 
-    count = 0
-
     for _, row in product_links_df.iterrows():
-        if count >= 1:
-            break
-        
         category_name = row["Category Name"]
         product_url = row["Product URL"]
 
-        # print("Scraping product:", product_url.split("https://www.butlersystem.com/")[-1])
-        # product_data = scrape_product(category_name, product_url)
-        product_data = scrape_product("inventory-clearance", "https://www.butlersystem.com/inventory-clearance/dri-eaz-filter-2nd-stage-defendair-500-air-scrubber")
+        print("Scraping product:", product_url.split("https://www.butlersystem.com/")[-1])
+        product_data = scrape_product(category_name, product_url)
         all_products.append(product_data)
-
-        count += 1
 
         # time.sleep(1)
 
@@ -357,16 +339,15 @@ def scrape():
 if __name__ == "__main__":
     categories_df, products_df = scrape()
 
-    # print("\nCATEGORIES")
-    # print(categories_df)
+    print("\nCATEGORIES")
+    print(categories_df)
 
-    # print("\nPRODUCTS")
-    # print(products_df["Sale Price"])
+    print("\nPRODUCTS")
+    print(products_df)
 
-    # categories_df.to_excel("butler_categories.xlsx", index=False, engine="xlsxwriter")
-    # products_df.to_excel("butler_products.xlsx", index=False, engine="xlsxwriter")
-    products_df.to_csv("butler_products.csv", index=False)
+    categories_df.to_excel("butler_categories.xlsx", index=False, engine="xlsxwriter")
+    products_df.to_excel("butler_products.xlsx", index=False, engine="xlsxwriter")
 
-    # print("\nSaved:")
-    # print(" - butler_categories.xlsx")
-    # print(" - butler_products.xlsx")
+    print("\nSaved:")
+    print(" - butler_categories.xlsx")
+    print(" - butler_products.xlsx")
